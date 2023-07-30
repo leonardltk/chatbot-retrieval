@@ -122,7 +122,8 @@ def ask():
 
     model_output, citations, inference_costs = chat_class.process_user_input(user_input,
                                                                              embedding_class.vectordb,
-                                                                             RETRIEVER_KWARGS)
+                                                                             RETRIEVER_KWARGS
+                                                                             )
 
     # Return the model's output
     return jsonify({
@@ -164,11 +165,12 @@ if __name__ == '__main__':
                                        chroma_dir=CHROMA_DIR, 
                                        force=False)
 
-    if 1: # Inference model
+    if 0: # Inference model (google t5)
         model_name = "google/flan-t5-base"
         chat_class = ChatModel(model_name)
-        # model_name = "meta-llama/Llama-2-7b-chat-hf"
-        # chat_class = LlamaModel(model_name, HF_ACCESS_TOKEN=os.getenv("HF_ACCESS_TOKEN"))
+    if 1: # Inference model (llama2)
+        model_name = "meta-llama/Llama-2-7b-chat-hf"
+        chat_class = LlamaModel(model_name, HF_ACCESS_TOKEN=os.getenv("HF_ACCESS_TOKEN"))
 
     # Start Flask app
     app.run(debug=False)
