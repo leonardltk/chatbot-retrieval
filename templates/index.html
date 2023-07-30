@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Chatbot</title>
+        <style>
+            #chatbox, #facts {
+                width: 49%;
+                height: 80vh;
+                border: 1px solid #ccc;
+                padding: 10px;
+                overflow-y: auto;
+                overflow-x: auto;
+                float: left;
+                box-sizing: border-box;
+                white-space: pre-wrap; /* This allows for the preservation of newlines and spaces */
+            }
+            #user-input {
+                width: 90%;
+            }
+            #chat_costs_section, #table_costs_section {
+                width: 49%;
+                float: left;
+            }
+        </style>
+    </head>
+    <body>
+        <!-- 
+        ---------------------  Div section ---------------------
+        -->
+        <div id="chatbox"></div>
+        <div id="facts"></div>
+        <br style="clear: both;">
+        <!-- chat_costs_section -->
+        <div id="chat_costs_section">
+            <input id="user-input" type="text" placeholder="Type your message here...">
+            <button id="send-button">Send</button>
+            <button id="summarise-button">Summarise</button>
+            <div id="task1_result"></div>
+            <div id="task2_result"></div>
+        </div>
+        <!-- table_costs_section -->
+        <div id="table_costs_section">
+            <input type="file" id="file-upload" name="file" accept=".pdf">
+            <button id="upload-file-button">Create Table</button>
+            <button id="add-file-button">Add To Table</button>
+            <div id="table-cost"></div>
+        </div>
+        <!-- 
+        ---------------------  Script section ---------------------
+        -->
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.5.1/jquery.min.js"></script>
+        <script>
+            $(document).ready(function() {
+
+                /** --- startup --- */
+                $.ajax({
+                    url: '/static/chunks.txt',
+                    method: 'GET',
+                    success: function(response) {
+                        $('#facts').text(response);
+                    },
+                    error: function(jqXHR, textStatus, errorThrown) {
+                        if(jqXHR.status === 404) {
+                            $('#facts').text('File not found');
+                        }
+                    }
+                });
+
+                /** --- chatbot --- */
+                $('#send-button').click(function() {
+                    var userInput = $('#user-input').val();
+                    $('#chatbox').append('<p>You: ' + userInput + '</p>');
+                    $('#user-input').val('');
+                    $.ajax({
+                        url: '/ask',
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify({ 'input': userInput }),
+                        success: function(response) {
+                            $('#chatbox').append('<p>[Citation]: ' + response.citations + '</p>');
+                            $('#chatbox').append('<p>Bot: ' + response.output + '</p>');
+                            $('#chatbox').append('<p> -------------------- </p>');
+                            $('#task1_result').text('Embedding Cost: $' + response.embedding_cost);
+                            $('#task2_result').text('LLM Cost: $' + response.prompt_cost);
+                        }
+                    });
+                });
+
+                $('#summarise-button').click(function() {
+                    $('#chatbox').append('<p> Summarising... </p>');
+                    $.ajax({
+                        url: '/summarise',
+                        method: 'POST',
+                        contentType: 'application/json',
+                        success: function(response) {
+                            $('#chatbox').append('<p>[Citation]: ' + response.citations + '</p>');
+                            $('#chatbox').append('<p>' + response.output + '</p>');
+                            $('#chatbox').append('<p> -------------------- </p>');
+                            $('#task1_result').text('Embedding Cost: $' + response.embedding_cost);
+                            $('#task2_result').text('LLM Cost: $' + response.prompt_cost);
+                        }
+                    });
+                });
+
+                /** --- files to table --- */
+                $('#upload-file-button').click(function() {
+                    var fileInput = document.getElementById('file-upload');
+                    var file = fileInput.files[0];
+                    var formData = new FormData();
+                    formData.append('file', file);
+
+                    $.ajax({
+                        url: '/upload_file',
+                        method: 'POST',
+                        data: formData,
+                        processData: false,
+                        contentType: false,
+                        success: function(response) {
+                            console.log(response.status)
+
+                            $.ajax({
+                                url: '/static/chunks.txt',
+                                method: 'GET',
+                                success: function(response) {
+                                    $('#facts').text(response);
+                                }
+                            });
+
+                            $('#table-cost').text('Cost of making table: $' + response.table_cost);
+
+                        }
+                    });
+
+                });
+
+                $('#add-file-button').click(function() {
+                    var fileInput = document.getElementById('file-upload');
+                    var file = fileInput.files[0];
+                    var formData = new FormData();
+                    formData.append('file', file);
+
+                    $.ajax({
+                        url: '/add_file',
+                        method: 'POST',
+                        data: formData,
+                        processData: false,
+                        contentType: false,
+                        success: function(response) {
+                            console.log(response.status)
+
+                            $.ajax({
+                                url: '/static/chunks.txt',
+                                method: 'GET',
+                                success: function(response) {
+                                    $('#facts').text(response);
+                                }
+                            });
+
+                            $('#table-cost').text('Cost of making table: $' + response.table_cost);
+
+                        }
+                    });
+
+                });
+
+            });
+        </script>
+    </body>
+</html>
