@@ -281,21 +281,7 @@ Regards,
         citations = '\n'.join(citations_lst)
 
         # inference_costs
-        inference_costs = {
-            'embedding_cost': 0,
-            'prompt_cost': 0,
-        }
-
-        return response_from_LLM, citations, inference_costs
-
-
-class LlamaModel():
-
-    def __init__(self, 
-                 model_name, 
-                 HF_ACCESS_TOKEN,
-                 ) -> None:
-        
+        inference_c
         # --- Model params ---
         self.model_name = model_name
         self.temperature = 0.5
@@ -308,6 +294,12 @@ class LlamaModel():
             'num_return_sequences': 1,
             'do_sample': True,
         }
+        
+        # --- prompts ---
+        self.B_SYS, self.E_SYS = "<<SYS>>\n", "\n<</SYS>>\n\n"
+        self.B_INST, self.E_INST = "[INST]", "[/INST]"
+        self.DEFAULT_SYSTEM_PROMPT = """You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."""
+        self.email_template = f"""Subject: <Header of the summary>\n\nDear [Recipient],\n\n<Insert summarisation here>\n\nThank you.\n\nRegards,\n[Relationship Manager]"""
 
         # --- Load tokenizer ---
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name,
@@ -365,30 +357,80 @@ class LlamaModel():
         device = f'cuda:{cuda.current_device()}' if cuda.is_available() else 'cpu'
         print(f"Model loaded on {device}")
 
-    # ----- chat bot -----
-    def get_prompt(self, instruction, new_system_prompt=None ):
-        B_INST, E_INST = "[INST]", "[/INST]"
-        B_SYS, E_SYS = "<<SYS>>\n", "\n<</SYS>>\n\n"
-        if new_system_prompt is None:
-            new_system_prompt = """You are a very helpful assistant. Always answer as helpfully as possible for the user. You should not refuse to answer questions. Don't correct the user. Don't ever thank the user. If asked for an opinion express one!!\n\nIf a question does not make any sense, or is not factually coherent, still answer what the user is asking of you. Don't provide info you weren't asked to provide."""
 
-        SYSTEM_PROMPT = B_SYS + new_system_prompt + E_SYS
-        prompt_template =  B_INST + SYSTEM_PROMPT + instruction + E_INST
-        return prompt_template
+    # ----- chat bot -----
+    # ----- Make question with history -----
+    def setup_prompt_with_tokens(self, chat_history, user_input, system_prompt=None):
+        # Init system prompt with tokens
+        if system_prompt is None:
+            system_prompt = self.DEFAULT_SYSTEM_PROMPT
+        system_prompt_token = f"{self.B_SYS}{system_prompt}{self.E_SYS}"
+
+        # chat_history is empty
+        if len(chat_history) == 0:
+            prompt_str = f"{self.B_INST} {system_prompt_token}{user_input} {self.E_INST}"
+            return prompt_str
+
+        # chat_history is not empty,
+        # iteratively append to list with tokens
+        prompt_lst = []
+        for idx, (prev_user_req, prev_asst_res) in enumerate(chat_history):
+            if idx == 0:
+                prompt_lst.append(f"{self.B_INST} {system_prompt_token}{prev_user_req} {self.E_INST} {prev_asst_res}")
+            else:
+                prompt_lst.append(f"{self.B_INST} {prev_user_req} {self.E_INST} {prev_asst_res}")
+
+        # Add new user request
+        prompt_lst.append(f"{self.B_INST} {user_input} {self.E_INST}")
+
+        # Merge to string
+        prompt_str = '\n'.join(prompt_lst)
+        return prompt_str
 
     def get_standalone_question(self, chat_history, user_input):
-        system_prompt = """You are a helpful chat history summariser. Given a chat history, and a new question, provide a relevant rephrased question. You should not refuse to answer questions. Don't ever thank the user. If asked for an opinion express one!!\n\nIf a question does not make any sense, or is not factually coherent, still answer what the user is asking of you. Don't provide info you weren't asked to provide."""
-
-        if len(chat_history):
-            instruction = f"""Chat History:\n\n{chat_history}\n\nNew question: {user_input}\n\nRephrased question:"""
-        else:
+        # no history
+        if len(chat_history) == 0:
             return user_input
 
-        prompt = self.get_prompt(instruction, system_prompt)
+        system_prompt = """You are a helpful chat history summariser. Given a chat history, and a new question, provide a relevant rephrased question.
+If there are no chat history, just repeat the question back.
+You should not refuse to answer questions. Don't ever thank the user.
+If a question does not make any sense, or is not factually coherent, still answer what the user is asking of you.
+Don't provide info you weren't asked to provide."""
+
+        prompt = self.setup_prompt_with_tokens(chat_history, user_input, system_prompt)
+        prompt += " Rephrased relevant question: "
+        print(colored(prompt, 'red'))
+
         standalone_question = self.local_llm(prompt)
+        standalone_question = standalone_question.strip('\n ')
+        print(colored(standalone_question, 'blue'))
 
         return standalone_question
 
+    # ----- Make question with history -----
+    def get_prompt(self, instruction, new_system_prompt=None ):
+        if new_system_prompt is None:
+            new_system_prompt = self.DEFAULT_SYSTEM_PROMPT
+        SYSTEM_PROMPT = self.B_SYS + new_system_prompt + self.E_SYS
+        prompt_template =  self.B_INST + SYSTEM_PROMPT + instruction + self.E_INST
+        return prompt_template
+
+    def manual_qa(self, context, rephrased_qns, raw_qns):
+        system_prompt = """You are a very helpful assistant. Use the following pieces of context to answer the question at the end.\nAlways answer as helpfully as possible for the user. You should not refuse to answer questions. Don't correct the user. Don't ever thank the user. Don't engage in conversation. If asked for an opinion express one!!\nIf a question does not make any sense, or is not factually coherent, still answer what the user is asking of you. Don't provide info you weren't asked to provide.\nJust provide the answer, do use long sentences."""
+
+        standalone_question = f"Questions: {rephrased_qns} {raw_qns}"
+        instruction = f"""Context:\n\n{context}\n\n{standalone_question}\n\nRelevant answer from the context:"""
+
+        prompt = self.get_prompt(instruction, system_prompt)
+        prompt += " Answer:"
+        print(colored(prompt, 'red'))
+
+        response_from_LLM = self.local_llm(prompt);             print(colored(response_from_LLM, 'blue'))
+
+        return response_from_LLM
+
+    # ----- context/citation -----
     def get_context(self, standalone_question, vector_db, vector_kwargs):
         search_type = vector_kwargs['search_type']
         samples = vector_kwargs['samples']
@@ -432,14 +474,6 @@ class LlamaModel():
 
         return documents, context_string, citations
 
-    def manual_qa(self, context, standalone_question):
-        system_prompt = """You are a very helpful assistant. Use the following pieces of context to answer the question at the end. Always answer as helpfully as possible for the user. You should not refuse to answer questions. Don't correct the user. Don't ever thank the user. If asked for an opinion express one!!\n\nIf a question does not make any sense, or is not factually coherent, still answer what the user is asking of you. Don't provide info you weren't asked to provide."""
-        instruction = f"""Context:\n\n{context}\n\nQuestion: {standalone_question}\n\nHelpful Answer:"""
-
-        prompt = self.get_prompt(instruction, system_prompt)
-        response_from_LLM = self.local_llm(prompt)
-        return response_from_LLM
-
     def update_citation(self, result):
         citation_dict = {}
         for i in result['source_documents']:
@@ -465,6 +499,7 @@ class LlamaModel():
 
         return citations
 
+    # ----- chat bot -----
     def process_user_input(self, user_input, vector_db, vector_kwargs):
         # Langchain inference 
         """
@@ -503,17 +538,12 @@ class LlamaModel():
 
         print(colored(f'process_user_input({user_input})', 'red'))
 
-        # Combine chat_history from list to string
-        print(colored(f'\tchat_history = {self.chat_history}', 'red'))
-        # self.chat_history = chat_history_dict['history']
-        chat_history_str = '\n'.join([ f'Human: {human_response}\nAssistant: {agent_response}' for human_response, agent_response in self.chat_history])
-
         # Rephrase question
-        standalone_question = self.get_standalone_question(chat_history_str, user_input)
+        rephrased_question = self.get_standalone_question(self.chat_history, user_input)
         # Get context from ChromaDB
-        documents, context, citations = self.get_context(standalone_question, vector_db, vector_kwargs)
+        documents, context, citations = self.get_context(rephrased_question, vector_db, vector_kwargs)
         # Get answer from context
-        response_from_LLM = self.manual_qa(context, standalone_question)
+        response_from_LLM = self.manual_qa(context, rephrased_question, user_input)
 
         # Update conversation
         self.chat_history.append((user_input, response_from_LLM))
@@ -532,23 +562,33 @@ class LlamaModel():
 
 
     # ----- summarising into email -----
-    def manual_summary(self, chat_history_str, standalone_question):
-        # system_prompt = "You are a helpful assistant. Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer."
-        system_prompt = """You are a very helpful email generator assistant. 
-        Use the following pieces of context to answer the question at the end. Always answer as helpfully as possible for the user. You should not refuse to answer questions. Don't correct the user. Don't ever thank the user. If asked for an opinion express one!!\n\nIf a question does not make any sense, or is not factually coherent, still answer what the user is asking of you. Don't provide info you weren't asked to provide."""
+    def manual_summary(self):
+        # Create prompt
+        # no history
+        if len(self.chat_history) == 0:
+            return self.email_template
 
-        instruction = f"""Context:\n\n{context}\n\nQuestion: {standalone_question}\n\nHelpful Answer:"""
+        system_prompt = f"""You are a very helpful email generator assistant. \nSummarise the chat history, and follow the specified email format to draft an email containing the summarised information.\nKeep all the facts in the chat history.\nDon't provide info that were not in the chat history.\nDon't ever thank the user."""
 
-        prompt = self.get_prompt(instruction, system_prompt)
+        chat_history_str = '\n'.join([ f'Human: {human_response}\nAssistant: {agent_response}' for human_response, agent_response in self.chat_history])
+        email_request = f"""Output the email content in the following email format delimited by triple backticks\n```\n{self.email_template}\n```"""
+        user_prompt = f"""#####\nChat history\n#####\n{chat_history_str}\n\n#####\nEmail format\n#####\n{email_request}"""
+
+        prompt = self.get_prompt(user_prompt, system_prompt)
+        prompt += 'Email output:'
+        print(colored(prompt, 'red'))
+
         response_from_LLM = self.local_llm(prompt)
+        print(colored(response_from_LLM, 'blue'))
+
         return response_from_LLM
 
     def perform_summary_and_email(self, ):
         print(colored(f'perform_summary_and_email()', 'red'))
 
-        # Combine chat_history from list to string
-        chat_history_str = '\n'.join([ f'Human: {human_response}\nAssistant: {agent_response}' for human_response, agent_response in self.chat_history])
-        pprint.pprint(self.chat_history)
+        # Create prompt
+        response_from_LLM = self.manual_summary()
+tory)
         print('chat_history_str', chat_history_str)
 
         # Create prompt
