@@ -145,9 +145,7 @@ Standalone question:"""
 
     def manual_qa(self, context, standalone_question):
         prompt = f"""Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer.
-
 {context}
-
 Question: {standalone_question}
 Helpful Answer:"""
         response_from_LLM = self.local_llm(prompt)
@@ -254,19 +252,13 @@ Helpful Answer:"""
         # Create prompt
         prompt_chat_history = f"""Given the following chat history:
 {chat_history_str}
-
 Summarise the facts from the chat history, then present these summary into an email form.
 Don't try to make up an answer.
 The output should follow this format:
-
 Subject: <Header of the summary>
-
 Dear [Recipient],
-
 <Insert summarisation here>
-
 Thank you.
-
 Regards,
 [Relationship Manager]"""
 
@@ -281,12 +273,25 @@ Regards,
         citations = '\n'.join(citations_lst)
 
         # inference_costs
-        inference_c
+        inference_costs = {
+            'embedding_cost': 0,
+            'prompt_cost': 0,
+        }
+
+        return response_from_LLM, citations, inference_costs
+
+
+class LlamaModel():
+
+    def __init__(self, 
+                 model_name, 
+                 HF_ACCESS_TOKEN,
+                 ) -> None:
+
         # --- Model params ---
         self.model_name = model_name
         self.temperature = 0.5
         self.pipeline_params = {
-            'max_length': 512,
             'max_new_tokens': 512,
             'top_p': 0.95,
             'top_k': 30,
@@ -294,12 +299,16 @@ Regards,
             'num_return_sequences': 1,
             'do_sample': True,
         }
-        
-        # --- prompts ---
+
+        # --- Init params ---
         self.B_SYS, self.E_SYS = "<<SYS>>\n", "\n<</SYS>>\n\n"
         self.B_INST, self.E_INST = "[INST]", "[/INST]"
-        self.DEFAULT_SYSTEM_PROMPT = """You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.\n\nIf a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."""
+        self.DEFAULT_SYSTEM_PROMPT = """\
+You are a helpful, respectful and honest assistant. Always answer as helpfully as possible, while being safe. Your answers should not include any harmful, unethical, racist, sexist, toxic, dangerous, or illegal content. Please ensure that your responses are socially unbiased and positive in nature.
+
+If a question does not make any sense, or is not factually coherent, explain why instead of answering something not correct. If you don't know the answer to a question, please don't share false information."""
         self.email_template = f"""Subject: <Header of the summary>\n\nDear [Recipient],\n\n<Insert summarisation here>\n\nThank you.\n\nRegards,\n[Relationship Manager]"""
+
 
         # --- Load tokenizer ---
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name,
@@ -307,6 +316,7 @@ Regards,
 
         # --- Load model ---
         self.init_model(HF_ACCESS_TOKEN)
+
 
         # --- Initialise the pipeline ---
         self.pipe = pipeline("text-generation",
@@ -317,13 +327,13 @@ Regards,
                         device_map="auto",
                         **self.pipeline_params
                     )
-
         self.local_llm = HuggingFacePipeline(pipeline=self.pipe,
                                              model_kwargs = {'temperature':self.temperature})
         
         # --- chat history memory ---
         self.chat_history = []
         self.total_citation_dict = {}
+
 
     # ----- load the model differently -----
     def init_model(self, HF_ACCESS_TOKEN):
@@ -368,7 +378,7 @@ Regards,
 
         # chat_history is empty
         if len(chat_history) == 0:
-            prompt_str = f"{self.B_INST} {system_prompt_token}{user_input} {self.E_INST}"
+            prompt_str = f"<s>{self.B_INST} {system_prompt_token}{user_input} {self.E_INST}"
             return prompt_str
 
         # chat_history is not empty,
@@ -376,9 +386,9 @@ Regards,
         prompt_lst = []
         for idx, (prev_user_req, prev_asst_res) in enumerate(chat_history):
             if idx == 0:
-                prompt_lst.append(f"{self.B_INST} {system_prompt_token}{prev_user_req} {self.E_INST} {prev_asst_res}")
+                prompt_lst.append(f"<s>{self.B_INST} {system_prompt_token}{prev_user_req} {self.E_INST} {prev_asst_res} </s><s>")
             else:
-                prompt_lst.append(f"{self.B_INST} {prev_user_req} {self.E_INST} {prev_asst_res}")
+                prompt_lst.append(f"{self.B_INST} {prev_user_req} {self.E_INST} {prev_asst_res} </s><s>")
 
         # Add new user request
         prompt_lst.append(f"{self.B_INST} {user_input} {self.E_INST}")
@@ -392,9 +402,13 @@ Regards,
         if len(chat_history) == 0:
             return user_input
 
-        system_prompt = """You are a helpful chat history summariser. Given a chat history, and a new question, provide a relevant rephrased question.
+        system_prompt = """You are a helpful assistant in rephrasing question using the memory of chat history.
+Given a chat history, and a new question, provide a relevant rephrased question.
+Make sure the generated question is asking the same thing as the original question.
 If there are no chat history, just repeat the question back.
-You should not refuse to answer questions. Don't ever thank the user.
+You should not refuse to answer questions.
+Don't ever thank the user.
+Don't provide simulation or fictional scenerio, just rephrase the question.
 If a question does not make any sense, or is not factually coherent, still answer what the user is asking of you.
 Don't provide info you weren't asked to provide."""
 
@@ -413,17 +427,30 @@ Don't provide info you weren't asked to provide."""
         if new_system_prompt is None:
             new_system_prompt = self.DEFAULT_SYSTEM_PROMPT
         SYSTEM_PROMPT = self.B_SYS + new_system_prompt + self.E_SYS
-        prompt_template =  self.B_INST + SYSTEM_PROMPT + instruction + self.E_INST
+        prompt_template =  '<s>' + self.B_INST + SYSTEM_PROMPT + instruction + self.E_INST
         return prompt_template
 
     def manual_qa(self, context, rephrased_qns, raw_qns):
-        system_prompt = """You are a very helpful assistant. Use the following pieces of context to answer the question at the end.\nAlways answer as helpfully as possible for the user. You should not refuse to answer questions. Don't correct the user. Don't ever thank the user. Don't engage in conversation. If asked for an opinion express one!!\nIf a question does not make any sense, or is not factually coherent, still answer what the user is asking of you. Don't provide info you weren't asked to provide.\nJust provide the answer, do use long sentences."""
+        system_prompt = """You are a very helpful assistant.
+Use the only the information from the context to answer the question at the end.
+Do not use any information other than the provided context.
+If you dont know the answer, just say i don't know.
+Find the closest answer from the context.
+Always answer as helpfully as possible for the user.
+You should not refuse to answer questions.
+Don't correct the user.
+Don't ever thank the user.
+Don't engage in conversation.
+If asked for an opinion express one!!
+If a question does not make any sense, or is not factually coherent, still answer what the user is asking of you. 
+Don't provide info you weren't asked to provide.
+Just provide the answer, do not use long sentences."""
 
-        standalone_question = f"Questions: {rephrased_qns} {raw_qns}"
-        instruction = f"""Context:\n\n{context}\n\n{standalone_question}\n\nRelevant answer from the context:"""
+        standalone_question = f"Questions: {raw_qns} {rephrased_qns}"
+        instruction = f"""Context:\n\n{context}\n\n{standalone_question}"""
 
         prompt = self.get_prompt(instruction, system_prompt)
-        prompt += " Answer:"
+        prompt += " Relevant answer from the context:"
         print(colored(prompt, 'red'))
 
         response_from_LLM = self.local_llm(prompt);             print(colored(response_from_LLM, 'blue'))
@@ -588,7 +615,7 @@ Don't provide info you weren't asked to provide."""
 
         # Create prompt
         response_from_LLM = self.manual_summary()
-tory)
+        chat_history_str = '\n'.join([ f'Human: {human_response}\nAssistant: {agent_response}' for human_response, agent_response in self.chat_history])
         print('chat_history_str', chat_history_str)
 
         # Create prompt
@@ -627,3 +654,5 @@ Regards,
         }
 
         return response_from_LLM, citations, inference_costs
+
+# 
