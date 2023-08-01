@@ -329,7 +329,7 @@ If a question does not make any sense, or is not factually coherent, explain why
                     )
         self.local_llm = HuggingFacePipeline(pipeline=self.pipe,
                                              model_kwargs = {'temperature':self.temperature})
-        
+
         # --- chat history memory ---
         self.chat_history = []
         self.total_citation_dict = {}
@@ -378,7 +378,7 @@ If a question does not make any sense, or is not factually coherent, explain why
 
         # chat_history is empty
         if len(chat_history) == 0:
-            prompt_str = f"<s>{self.B_INST} {system_prompt_token}{user_input} {self.E_INST}"
+            prompt_str = f"{self.B_INST} {system_prompt_token}{user_input} {self.E_INST}"
             return prompt_str
 
         # chat_history is not empty,
@@ -386,9 +386,9 @@ If a question does not make any sense, or is not factually coherent, explain why
         prompt_lst = []
         for idx, (prev_user_req, prev_asst_res) in enumerate(chat_history):
             if idx == 0:
-                prompt_lst.append(f"<s>{self.B_INST} {system_prompt_token}{prev_user_req} {self.E_INST} {prev_asst_res} </s><s>")
+                prompt_lst.append(f"{self.B_INST} {system_prompt_token}{prev_user_req} {self.E_INST} {prev_asst_res} ")
             else:
-                prompt_lst.append(f"{self.B_INST} {prev_user_req} {self.E_INST} {prev_asst_res} </s><s>")
+                prompt_lst.append(f"{self.B_INST} {prev_user_req} {self.E_INST} {prev_asst_res} ")
 
         # Add new user request
         prompt_lst.append(f"{self.B_INST} {user_input} {self.E_INST}")
@@ -427,7 +427,7 @@ Don't provide info you weren't asked to provide."""
         if new_system_prompt is None:
             new_system_prompt = self.DEFAULT_SYSTEM_PROMPT
         SYSTEM_PROMPT = self.B_SYS + new_system_prompt + self.E_SYS
-        prompt_template =  '<s>' + self.B_INST + SYSTEM_PROMPT + instruction + self.E_INST
+        prompt_template =  self.B_INST + SYSTEM_PROMPT + instruction + self.E_INST
         return prompt_template
 
     def manual_qa(self, context, rephrased_qns, raw_qns):
